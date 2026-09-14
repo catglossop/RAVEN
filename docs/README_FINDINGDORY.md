@@ -24,7 +24,7 @@ This evaluation is training-free. Since no official test split is provided for h
     │           └── ...
     ```
 
-2. Activate conda environment, `conda activate raven`
+2. Activate the environment, `source .venv/bin/activate` (or prefix the commands below with `uv run`)
 
 3. Run evaluation. The evaluation pipeline is resumable and can continue from the last completed query sample, under the same command. 
 

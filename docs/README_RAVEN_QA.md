@@ -1,6 +1,7 @@
 
 # Evaluation on RAVEN-QA
-Activate the `raven` conda environment. Data are released [HERE](https://huggingface.co/datasets/zzcnewly/RAVEN_QA), please place them under `./data` as follows.
+Activate the RAVEN environment (`source .venv/bin/activate`, or prefix the
+commands below with `uv run`). Data are released [HERE](https://huggingface.co/datasets/zzcnewly/RAVEN_QA), please place them under `./data` as follows.
 
 ```
 data/

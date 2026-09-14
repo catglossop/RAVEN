@@ -1,26 +1,46 @@
 #!/usr/bin/env bash
+#
+# Set up the RAVEN environment with uv.
+#
+# Usage:
+#   bash docs/raven_setup.sh            # default environment
+#   bash docs/raven_setup.sh --gpu      # additionally install faiss-gpu
+#
+# The environment is created at ./.venv from pyproject.toml + uv.lock. Activate
+# it with `source .venv/bin/activate`, or prefix commands with `uv run`.
 
-# This is required to activate conda environment
-eval "$(conda shell.bash hook)"
+set -euo pipefail
 
-CONDA_ENV=${1:-""}
-if [ -n "$CONDA_ENV" ]; then
-    conda create -n $CONDA_ENV python=3.10 -y
-    conda activate $CONDA_ENV
-else
-    echo "Skipping conda environment creation. Make sure you have the correct environment activated."
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
+
+EXTRAS=()
+for arg in "$@"; do
+    case "$arg" in
+        --gpu) EXTRAS+=(--extra gpu) ;;
+        *) echo "Unknown option: $arg" >&2; exit 1 ;;
+    esac
+done
+
+# Install uv if it is not already available.
+if ! command -v uv >/dev/null 2>&1; then
+    echo "uv not found, installing it..."
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    export PATH="$HOME/.local/bin:$PATH"
 fi
 
-python -m pip install --upgrade pip
+# Creates ./.venv with the exact versions pinned in uv.lock, downloading
+# CPython 3.10 if the host does not provide it.
+uv sync "${EXTRAS[@]+"${EXTRAS[@]}"}"
 
-conda activate $CONDA_ENV
+cat <<'EOF'
 
+Done. Activate the environment with:
 
-pip install torch==2.8.0 torchvision==0.23.0 transformers==4.44.2 tokenizers==0.19.1
-pip install vertexai==1.71.1 google-ai-generativelanguage==0.7.0 open-clip-torch==3.2.0 volcengine-python-sdk==4.0.23 qwen-vl-utils==0.0.14
-pip install langchain==0.3.27 langchain-community==0.3.30 langchain-core==0.3.77 langchain-google-genai==2.1.12 langchain-huggingface==0.3.1 langchain-milvus==0.2.1 langchain-nvidia-ai-endpoints==0.3.18 langchain-ollama==0.3.10 langchain-openai==0.3.34 langchain-text-splitters==0.3.11 langgraph==0.4.0 langgraph-checkpoint==2.1.1 langgraph-prebuilt==0.1.8 langgraph-sdk==0.2.9 langsmith==0.4.31
-pip install opencv-python==4.12.0.88 pillow==10.4.0  
-pip install faiss-cpu==1.12.0  faiss-gpu==1.7.2  accelerate==0.33.0 
-pip install sentence-transformers
-pip install -e external/qqmm-package
-pip install datasets==4.3.0
+    source .venv/bin/activate
+
+or run commands directly without activating:
+
+    uv run python raven_qa_run.py --dataset real_world --agent raven --embedder qqmm --vlm gp3
+
+EOF

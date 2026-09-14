@@ -30,7 +30,12 @@ eval_outs
 # milvus-related
 embedEtcd.yaml
 *.lock
+!uv.lock
 volumes
+
+# uv / virtualenv
+.venv/
+venv/
 
 # secrets
 client_secrets.json

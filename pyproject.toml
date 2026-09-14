@@ -1,0 +1,103 @@
+[project]
+name = "raven"
+version = "0.1.0"
+description = "RAVEN: Long-Horizon Reasoning and Navigation with a Visuo-Spatial-Temporal Memory"
+readme = "README.md"
+requires-python = ">=3.10,<3.11"
+license = { file = "LICENSE.md" }
+authors = [
+    { name = "Yixun Hu" },
+    { name = "Zhicheng Zheng" },
+    { name = "Lihan Zha" },
+    { name = "Chunwei Xing" },
+    { name = "Rajdeep Singh" },
+    { name = "Omar Hossain" },
+    { name = "Antonio Loquercio" },
+    { name = "Dhruv Shah" },
+]
+
+dependencies = [
+    # --- core ML stack ---
+    "torch==2.8.0",
+    "torchvision==0.23.0",
+    "transformers==4.44.2",
+    "tokenizers==0.19.1",
+    "accelerate==0.33.0",
+    "sentence-transformers>=3.0",
+    "datasets==4.3.0",
+    "qwen-vl-utils==0.0.14",
+    "open-clip-torch==3.2.0",
+
+    # --- model / API providers ---
+    "vertexai==1.71.1",
+    "google-ai-generativelanguage==0.7.0",
+    "volcengine-python-sdk==4.0.23",
+    "openai>=1.0",
+    "anthropic>=0.30",
+
+    # --- langchain / langgraph ---
+    "langchain==0.3.27",
+    "langchain-community==0.3.30",
+    "langchain-core==0.3.77",
+    "langchain-experimental>=0.3",
+    "langchain-google-genai==2.1.12",
+    "langchain-huggingface==0.3.1",
+    "langchain-milvus==0.2.1",
+    "langchain-nvidia-ai-endpoints==0.3.18",
+    "langchain-ollama==0.3.10",
+    "langchain-openai==0.3.34",
+    "langchain-text-splitters==0.3.11",
+    "langgraph==0.4.0",
+    "langgraph-checkpoint==2.1.1",
+    "langgraph-prebuilt==0.1.8",
+    "langgraph-sdk==0.2.9",
+    "langsmith==0.4.31",
+
+    # --- vision / retrieval ---
+    "opencv-python==4.12.0.88",
+    "pillow==10.4.0",
+    "faiss-cpu==1.12.0",
+
+    # --- local packages ---
+    "qqmm",
+
+    # --- general utilities imported directly by the code base ---
+    # numpy is held below 2.0 because accelerate==0.33.0 requires it; see
+    # [tool.uv] override-dependencies below.
+    "numpy>=1.26,<2",
+    "scipy>=1.10",
+    "pandas>=2.0",
+    "tqdm>=4.65",
+    "pyyaml>=6.0",
+    "requests>=2.31",
+    "pydantic>=2.7",
+]
+
+[project.optional-dependencies]
+# GPU FAISS. Kept out of the default set because the published wheels only
+# cover CPython <= 3.10 on manylinux.
+gpu = ["faiss-gpu==1.7.2"]
+# flash-attn is an optional accelerator for the QQMM / Qwen2-VL-NaViT models.
+# It builds against an installed CUDA toolkit, so install it explicitly:
+#   uv sync --extra flash --no-build-isolation
+flash = ["flash-attn>=2.5"]
+
+[tool.uv]
+# The original `docs/raven_setup.sh` installed opencv-python (numpy>=2) and then
+# accelerate==0.33.0 (numpy<2) in two separate pip commands, so pip silently
+# downgraded numpy to 1.26.x and that is the environment the project actually
+# ran on. uv resolves the whole graph at once and rejects that contradiction, so
+# pin numpy below 2.0 for every requirer to reproduce the same end state.
+# opencv-python's binaries are built against the numpy 2 headers and stay
+# runtime-compatible down to numpy 1.19, which is why this works in practice.
+override-dependencies = ["numpy>=1.26,<2"]
+
+[tool.uv.sources]
+qqmm = { path = "external/qqmm-package", editable = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["raven"]

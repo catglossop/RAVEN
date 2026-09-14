@@ -9,9 +9,31 @@ Yixun Hu\*, Zhicheng Zheng\*, Lihan Zha, Chunwei Xing, Rajdeep Singh, Omar Hossa
 
 ## Setup
 
+The project is managed with [uv](https://docs.astral.sh/uv/). `uv sync` creates
+`./.venv` from `pyproject.toml` and the pinned `uv.lock`, downloading CPython
+3.10 if your machine does not have it.
+
 ```bash
-bash docs/raven_setup.sh raven
-conda activate raven
+bash docs/raven_setup.sh
+source .venv/bin/activate
+```
+
+Or, if you already have `uv` installed, equivalently:
+
+```bash
+uv sync
+source .venv/bin/activate
+```
+
+Activating is optional — any command in these docs can instead be prefixed with
+`uv run` (e.g. `uv run python raven_qa_run.py ...`), which syncs the environment
+on the fly.
+
+Optional extras:
+
+```bash
+uv sync --extra gpu                            # faiss-gpu
+uv sync --extra flash --no-build-isolation     # flash-attn (needs a CUDA toolkit)
 ```
 ### If use open-source VLM models
 ```bash
