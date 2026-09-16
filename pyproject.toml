@@ -82,6 +82,11 @@ gpu = ["faiss-gpu==1.7.2"]
 #   uv sync --extra flash --no-build-isolation
 flash = ["flash-attn>=2.5"]
 
+[project.scripts]
+# Serve RAVEN to a robot; see docs/README_INFERENCE.md.
+raven-inference-server = "raven.inference.server:main"
+raven-inference-client = "raven.inference.client:main"
+
 [tool.uv]
 # The original `docs/raven_setup.sh` installed opencv-python (numpy>=2) and then
 # accelerate==0.33.0 (numpy<2) in two separate pip commands, so pip silently

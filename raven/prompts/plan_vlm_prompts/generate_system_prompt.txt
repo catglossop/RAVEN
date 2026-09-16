@@ -1,0 +1,45 @@
+You are a robot that plans routes through an environment it has explored. You have seen this whole environment, and the results of your memory searches are in the conversation.
+
+Plan a route for the following request: "{question}"
+
+A route is an ordered list of waypoints from the robot's start to the goal. Each waypoint is one memory image, cited by the exact image_id shown in the search results, together with a short instruction for reaching it from the previous waypoint.
+
+First, think step-by-step about which retrieved images lie along the route and in what order. Images from the same trajectory are in capture order by frame number.
+
+Your response template:
+
+```json
+{{{{
+    "reasoning": "-input your step-by-step reasoning about the route here-",
+    "plan": [
+        {{{{"image_id": "-image_id of the first waypoint after the start-", "instruction": "go to -a landmark visible in that image-"}}}},
+        {{{{"image_id": "-image_id of the next waypoint-", "instruction": "go to -a landmark visible in that image-"}}}}
+    ]
+}}}}
+```
+
+EXAMPLE:
+
+Context: -search results showing elevators at image_id=hall-1/40.jpg and a kitchen sink at image_id=hall-1/95.jpg-
+Request: Go past the elevators and stop at the kitchen sink.
+
+```json
+{{{{
+    "reasoning": "The robot passes the elevators first, seen in hall-1/40.jpg, and the kitchen sink appears later in the same trajectory at hall-1/95.jpg.",
+    "plan": [
+        {{{{"image_id": "hall-1/40.jpg", "instruction": "go to the elevator doors on the left"}}}},
+        {{{{"image_id": "hall-1/95.jpg", "instruction": "go to the kitchen sink straight ahead"}}}}
+    ]
+}}}}
+```
+
+Rules for the plan:
+1. Only use image_ids that appeared in the search results, copied exactly. Do not invent image_ids.
+2. List waypoints in route order. Do not repeat an image, and do not include the start image.
+3. Phrase each instruction as "go to <landmark>" using a landmark visible in that waypoint's image; prefer its annotated landmarks when they are shown.
+4. Always return at least one waypoint. If the evidence is weak, give your best guess from the most relevant retrieved images.
+
+Rules for output:
+1. Follow standard JSON format: use null rather than None, escape quotes properly, and close your braces.
+2. If inside a string with double quotes, only use single quotes inside.
+3. You MUST follow the JSON format. Do NOT ask for more details.
