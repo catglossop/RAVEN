@@ -12,8 +12,9 @@ Plan Bench v2: an ordered list of memory images, each with a "go to ..." instruc
 | `raven/inference/client.py` | `RAVENPlanningClient` and a command-line check, like `dummy_planning_test.py`; needs only the stdlib, numpy and PIL |
 | `raven/inference/plan.py` | Planning prompts, response schemas and plan parsing |
 | `raven/inference/plan_agent.py` | The RAVEN agent and memory used for planning |
-| `raven/inference/scene.py` | Scene directories, image conversion and the completion rule |
-| `raven/prompts/plan_vlm_prompts/` | The planning prompts evaluated on Plan Bench v2 |
+| `raven/inference/completion.py` | VLM goal-completion check (RAGNav's Gemma-mode prompt) |
+| `raven/inference/scene.py` | Scene directories, image conversion and the embedding completion rule |
+| `raven/prompts/plan_vlm_prompts/` | The planning prompts evaluated on Plan Bench v2, and the completion prompts |
 
 ## How RAVEN plans
 
@@ -47,29 +48,48 @@ This is the per-k protocol used in the Plan Bench runs.
 ## When a goal is reached
 
 The server decides when a goal is complete, as RAGNav's does. The OmniVLA action server
-calls `get_goal` every `--done-check-interval` actions. The server embeds the observation
-with QQMM and applies one of two rules:
+calls `get_goal` every `--done-check-interval` actions.
 
-- **`--completion localize` (default):** the goal is reached when one of the observation's
-  3 nearest memory images (`--completion-top-k`) lies within 10 frames
-  (`--completion-window`) of the goal image in the tour.
-- **`--completion threshold`:** RAGNav's rule. The goal is reached when the cosine
-  similarity to the goal image exceeds `--completion-threshold` (default 0.8).
+**Default: `--completion vlm`.** This is RAGNav's Gemma mode, run on RAVEN's VLM:
 
-Both rules were calibrated on OpenLORIS tours, which have 0.14 m between frames. The test
-compared views taken within 1 m of a frame and facing within 30° of it ("at goal") with views
-more than 3 m away:
+- The VLM receives RAGNav's completion prompt, the goal's instruction, the goal image, and the
+  224×224 crop of the robot's view. It replies with a score from 0.0 to 1.0.
+- The goal advances once the score exceeds 0.8 (`--completion-threshold`) on 2 checks in a row
+  (`--completion-consecutive`). RAGNav advances after 1.
+- Each check is one Gemini call: about 1.7 s median and $0.003 with thinking off
+  (`--completion-thinking-budget 0`, the default).
 
-| rule | at goal, accepted | > 3 m away, accepted |
+**Why the robot needs a VLM check.** The robot is always on a *different traversal* from the
+tour in memory. Replaying OpenLORIS home1 runs against another run's memory showed that
+single-image embeddings cannot tell whether that traversal has reached a goal:
+
+| Rule | Reachable goals accepted within 1.5 m | Unreachable goals accepted (> 3 m) |
 |---|---|---|
-| similarity > 0.80 | 66% | 3.8% |
-| top-3 neighbour within ±10 frames | 82% | 0.4% |
+| QQMM, a nearest memory image within ±17 frames of the goal | 20% | 85% |
+| QQMM, cosine similarity to the goal image > 0.8 | 12% | 6% |
 
-A false acceptance skips a subgoal. Because the check repeats every few actions, the
-localize rule's lower false-acceptance rate matters.
+Gemini with RAGNav's prompt was tested on 30 views per distance band, taken from other
+traversals than the goal image. "At goal" means within 0.75 m and facing within 45°.
 
-**Set the window to your tour's frame spacing:** ±10 frames is about ±1.4 m at 0.14 m per
-frame. Frames are ordered by numeric file name (`0.jpg`, `1.jpg`, ...), then by name.
+| Prompt | at goal | 1–2 m | 2.5–4 m | > 6 m |
+|---|---|---|---|---|
+| RAGNav's, verbatim (`--completion-prompt ragnav`) | 90% | 83% | 90% | **100%** |
+| without the skip rule (`no-skip`, default) | 47% | 0% | 7% | 7% |
+
+RAGNav's prompt tells the model to give a passing "skip" score when the goal is not in sight,
+so it accepts goals from anywhere. The `no-skip` prompt is RAGNav's with only that rule
+removed.
+
+About half of at-goal views pass a single check. That is enough, because the robot is checked
+repeatedly once it arrives. Requiring 2 passes in a row cuts accidental passes from farther
+away.
+
+**Embedding-only rules.** `--completion localize` and `--completion threshold` need no VLM
+calls, but are only reliable when the robot's views come from the same tour.
+
+- The `localize` window is measured in frames. Frames are ordered by numeric file name
+  (`0.jpg`, `1.jpg`, ...), then by name.
+- Set the window to about 1.4 m divided by the tour's frame spacing.
 
 ## Scene directory
 

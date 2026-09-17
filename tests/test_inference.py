@@ -126,6 +126,36 @@ class SceneTests(unittest.TestCase):
         self.assertFalse(goal_reached([50, 31, 3], 20, window=10))
 
 
+class CompletionTests(unittest.TestCase):
+    def test_scores_must_be_ragnav_values(self) -> None:
+        from raven.inference.completion import VALID_SCORES, parse_completion_score
+
+        self.assertEqual(VALID_SCORES[:3] + VALID_SCORES[-2:], ("0.0", "0.05", "0.1", "0.95", "1.0"))
+        self.assertEqual([parse_completion_score(s) for s in ("0.85", " 1.0\n", "0", "Score: 0.35")],
+                         [0.85, 1.0, 0.0, 0.35])
+        for bad in ("0.83", "85%", "1.05", "", "done"):
+            with self.subTest(bad), self.assertRaises(ValueError):
+                parse_completion_score(bad)
+
+    def test_message_lists_objective_target_then_evidence(self) -> None:
+        from raven.inference.completion import completion_user_parts
+
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "goal.jpg"
+            Image.new("RGB", (8, 8)).save(target)
+            parts = completion_user_parts("go to the desk", target, np.zeros((4, 4, 3), np.uint8))
+            only_image = completion_user_parts(None, target, np.zeros((4, 4, 3), np.uint8))
+        self.assertEqual([p.get("text", p["type"]) for p in parts], [
+            "Objective text: go to the desk", "\nObjective target image:", "image_url",
+            "\nEvidence image:", "image_url", "\nOutput only the score:",
+        ])
+        self.assertTrue(parts[2]["image_url"]["url"].startswith("data:image/jpeg;base64,"))
+        self.assertTrue(parts[4]["image_url"]["url"].startswith("data:image/png;base64,"))
+        self.assertEqual(only_image[0]["text"], "\nObjective target image:")
+        with self.assertRaises(ValueError):
+            completion_user_parts("", None, np.zeros((4, 4, 3), np.uint8))
+
+
 class FakeBackend:
     """Stands in for RAVENBackend: an observation's embedding is its colour's frame number."""
 
@@ -222,6 +252,42 @@ class ServerProtocolTests(unittest.TestCase):
         self.assertEqual(self.goal(7)["goal_index"], 0)
         response = self.goal(8)
         self.assertEqual((response["goal_index"], response["similarity"]), (1, 0.95))
+
+    def test_vlm_completion_scores_goal_text_image_and_cropped_view(self) -> None:
+        class Judge:
+            def __init__(self) -> None:
+                self.calls = []
+                self.scores = [0.5, 0.85, 0.9, 0.95]
+
+            def score(self, text, target, evidence):
+                self.calls.append((text, target, evidence.shape))
+                return self.scores.pop(0)
+
+        judge = Judge()
+        self.server = RAVENPlanningServer(self.backend, completion="vlm", judge=judge)
+        self.create()
+        stay = self.goal(3)
+        self.assertEqual((stay["goal_index"], stay["similarity"]), (0, 0.5))
+        self.assertEqual(judge.calls[0], ("go to the divider", str(self.scene_dir / "8.png"), (224, 224, 3)))
+        self.assertEqual(self.goal(3)["goal_index"], 1)
+        self.assertEqual(self.goal(3)["goal_index"], 2)
+        self.assertEqual(judge.calls[-1][0], "go to the shelf")
+        done = self.goal(3)
+        self.assertEqual((done["done"], done["similarity"]), (True, 0.95))
+        self.assertIsNone(judge.calls[-1][0])  # the last goal is image-only
+        with self.assertRaises(ValueError):
+            RAVENPlanningServer(self.backend, completion="vlm")
+
+    def test_consecutive_checks_must_all_pass(self) -> None:
+        class Judge:
+            scores = [0.9, 0.5, 0.9, 0.9]
+
+            def score(self, text, target, evidence):
+                return self.scores.pop(0)
+
+        self.server = RAVENPlanningServer(self.backend, completion="vlm", judge=Judge(), completion_consecutive=2)
+        self.create()
+        self.assertEqual([self.goal(3)["goal_index"] for _ in range(4)], [0, 0, 0, 1])
 
     def test_failed_plans_report_an_error_and_clear_the_old_plan(self) -> None:
         self.create()

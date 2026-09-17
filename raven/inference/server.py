@@ -19,10 +19,15 @@ each. Every waypoint becomes a ``VL`` goal (image and instruction); RAGNav repor
 ``modality: "L"`` with both fields set. The robot's start image is located in memory by
 nearest QQMM embedding and named in the question, as Plan Bench named the start image.
 
-Completion: the observation is embedded with QQMM; by default the goal is reached when one of
-the observation's three nearest memory images lies within ten frames of the goal image in the
-tour (``--completion localize``). ``--completion threshold`` instead advances when the cosine
-similarity to the goal image exceeds ``--completion-threshold`` (RAGNav's rule, 0.8).
+Completion: by default (``--completion vlm``) the VLM scores whether the robot's view shows the
+current goal, with RAGNav's Gemma completion prompt and inputs (objective text, goal image, 224
+crop of the view), and the goal advances once the score exceeds 0.8 on two checks in a row.
+RAGNav's prompt also asks for a passing "skip" score when the goal is not in sight; on
+cross-traversal OpenLORIS replays that accepted every view more than 6 m from the goal, so the
+default prompt leaves that rule out (``--completion-prompt ragnav`` restores it). The QQMM
+embedding rules (``localize``: a nearest memory image within ``--completion-window`` frames of
+the goal; ``threshold``: cosine similarity to the goal image) work within one tour but not
+across traversals, where a real robot always is.
 
 Run from the RAVEN repo (Gemini models need GOOGLE_API_KEY)::
 
@@ -63,7 +68,7 @@ from raven.inference.scene import (
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CACHE_DIR = REPO_ROOT / "output" / "inference_cache"
 _EMBED_CHUNK = 256
-COMPLETION_RULES = ("localize", "threshold")
+COMPLETION_RULES = ("vlm", "localize", "threshold")
 
 
 class Goal(NamedTuple):
@@ -339,17 +344,25 @@ class RAVENPlanningServer:
         completion_top_k: int = 3,
         completion_window: int = 10,
         completion_threshold: float = 0.8,
+        completion_consecutive: int = 1,
         include_instructions: bool = True,
         loopback_only: bool = False,
         log_dir: Optional[Path] = None,
+        judge: Any = None,
     ):
         if completion not in COMPLETION_RULES:
             raise ValueError(f"completion must be one of {COMPLETION_RULES}, got {completion!r}")
+        if completion == "vlm" and judge is None:
+            raise ValueError("completion='vlm' needs a judge (raven.inference.completion.VLMCompletionJudge)")
         self.backend = backend
+        self.judge = judge
         self.completion = completion
         self.completion_top_k = int(completion_top_k)
         self.completion_window = int(completion_window)
         self.completion_threshold = float(completion_threshold)
+        # Checks in a row that must pass before a goal counts as reached (RAGNav: 1).
+        self.completion_consecutive = max(1, int(completion_consecutive))
+        self._streak = 0
         self.include_instructions = include_instructions
         self.loopback_only = loopback_only
         self.log_dir = Path(log_dir) if log_dir else None
@@ -367,6 +380,7 @@ class RAVENPlanningServer:
     def _release_active_plan(self) -> None:
         self.plan = []
         self.goal_index = 0
+        self._streak = 0
 
     def create_plan(self, data: dict) -> dict:
         try:
@@ -410,16 +424,32 @@ class RAVENPlanningServer:
 
         goal = self.plan[self.goal_index]
         observation = _rgb_array(data["observation"], "observation")
-        top, sims = self.backend.nearest(self.backend.embed_image(observation), self.completion_top_k)
-        similarity = float(sims[goal.scene_index])
-        if self.completion == "threshold":
+        t0 = time.time()
+        if self.completion == "vlm":
+            # As RAGNav's Gemma mode: objective text and target image by modality, 224 crop as evidence.
+            similarity = float(self.judge.score(
+                goal.text if goal.modality in {"L", "VL"} else None,
+                goal.image_path if goal.modality in {"V", "VL"} else None,
+                to_model_image(observation, "observation"),
+            ))
             reached = similarity > self.completion_threshold
+            detail = f"VLM score {similarity:.2f}"
         else:
-            reached = goal_reached([int(i) for i in top], goal.scene_index, window=self.completion_window)
-        print(f"[GET_GOAL] goal {self.goal_index}/{len(self.plan)} {goal.image_id}: similarity {similarity:.3f}, "
-              f"nearest {[int(i) for i in top]} vs goal frame {goal.scene_index} -> "
-              f"{'reached' if reached else 'not reached'}", flush=True)
-        if reached:
+            top, sims = self.backend.nearest(self.backend.embed_image(observation), self.completion_top_k)
+            similarity = float(sims[goal.scene_index])
+            if self.completion == "threshold":
+                reached = similarity > self.completion_threshold
+            else:
+                reached = goal_reached([int(i) for i in top], goal.scene_index, window=self.completion_window)
+            detail = f"similarity {similarity:.3f}, nearest {[int(i) for i in top]} vs goal frame {goal.scene_index}"
+        self._streak = self._streak + 1 if reached else 0
+        advance = self._streak >= self.completion_consecutive
+        print(f"[GET_GOAL] goal {self.goal_index}/{len(self.plan)} {goal.image_id}: {detail} "
+              f"({time.time() - t0:.1f}s) -> {'reached' if reached else 'not reached'}"
+              f"{f' ({self._streak}/{self.completion_consecutive} in a row)' if self.completion_consecutive > 1 else ''}",
+              flush=True)
+        if advance:
+            self._streak = 0
             self.goal_index += 1
             if self.goal_index >= len(self.plan):
                 return {
@@ -567,11 +597,23 @@ def main(argv: Optional[List[str]] = None) -> None:
     group.add_argument("--log-dir", type=Path, help="append every plan to <log-dir>/plans.jsonl")
     group.add_argument("--debug", action="store_true", help="print RAVEN's prompts and replies")
     group = parser.add_argument_group("goal completion (get_goal)")
-    group.add_argument("--completion", choices=COMPLETION_RULES, default="localize")
+    group.add_argument("--completion", choices=COMPLETION_RULES, default="vlm",
+                       help="vlm: ask the VLM whether the view shows the goal (RAGNav's Gemma mode); "
+                            "localize / threshold: QQMM embeddings, unreliable across traversals")
     group.add_argument("--completion-top-k", type=int, default=3)
     group.add_argument("--completion-window", type=int, default=10,
                        help="frames; about 1.4 m at 0.14 m between tour frames")
-    group.add_argument("--completion-threshold", type=float, default=0.8)
+    group.add_argument("--completion-threshold", type=float, default=0.8,
+                       help="score (vlm) or cosine similarity (threshold) a goal must exceed")
+    group.add_argument("--completion-consecutive", type=int, default=2,
+                       help="checks in a row that must pass before a goal counts as reached (RAGNav: 1)")
+    group.add_argument("--completion-vlm", help="VLM for --completion vlm (default: --vlm)")
+    group.add_argument("--completion-prompt", choices=("no-skip", "ragnav"), default="no-skip",
+                       help="ragnav: RAGNav's Gemma prompt verbatim, which also gives a passing 'skip' "
+                            "score when the goal is not in sight")
+    group.add_argument("--completion-thinking-budget", type=int, default=0,
+                       help="Gemini thinking tokens per completion check; 0 halved latency (1.7 s median) "
+                            "with the same accuracy on OpenLORIS replays; -1 for the model default")
     group = parser.add_argument_group("accepted for RAGNav launch-script compatibility (ignored)")
     group.add_argument("--checkpoint-path")
     group.add_argument("--use-gemma", action="store_true")
@@ -598,12 +640,23 @@ def main(argv: Optional[List[str]] = None) -> None:
         landmarks = args.landmarks_file or find_landmarks_file(Path(args.scene_dir))
         backend.prepare(args.scene_dir, str(landmarks) if landmarks else None, args.poses_file)
 
+    judge = None
+    if args.completion == "vlm":
+        from raven.inference.completion import PROMPTS, VLMCompletionJudge
+
+        judge = VLMCompletionJudge(
+            resolve_llm(args.completion_vlm) if args.completion_vlm else backend.llm_type,
+            prompt_file=PROMPTS[args.completion_prompt],
+            thinking_budget=None if args.completion_thinking_budget < 0 else args.completion_thinking_budget,
+        )
     server = RAVENPlanningServer(
         backend,
+        judge=judge,
         completion=args.completion,
         completion_top_k=args.completion_top_k,
         completion_window=args.completion_window,
         completion_threshold=args.completion_threshold,
+        completion_consecutive=args.completion_consecutive,
         include_instructions=not args.no_instructions,
         loopback_only=not is_loopback_address(args.host) and not args.allow_remote_clients,
         log_dir=args.log_dir,

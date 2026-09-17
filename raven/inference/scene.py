@@ -198,8 +198,9 @@ def goal_reached(
 ) -> bool:
     """True if any of the observation's nearest memory images is within ``window`` frames of the goal.
 
-    On OpenLORIS tours (0.14 m between frames) the three nearest images within +-10 frames
-    accept 82% of views taken <1 m from the goal and facing within 30 degrees, and 0.4% of
-    views >3 m away; a 0.8 similarity threshold accepts 66% and 3.8%.
+    This works for views from the tour itself (OpenLORIS, 0.14 m between frames: top-3 within
+    +-10 frames accepts 82% of views <1 m and 30 degrees from the goal and 0.4% of views >3 m
+    away), but not for a robot on another traversal: replaying OpenLORIS home1 runs, it accepted
+    85% of goals the robot never came within 3 m of. Use the VLM check for robots.
     """
     return any(abs(int(index) - int(goal_index)) <= window for index in neighbour_indices)
