@@ -111,6 +111,12 @@ The server runs from the RAVEN repo in RAVEN's uv environment. Gemini models nee
 `GOOGLE_API_KEY`.
 
 ```bash
+# detached, survives the shell; logs to output/inference/
+bash scripts/launch_inference_server.sh
+SCENE_DIR=/data/scenes/bww8 GPU=0 bash scripts/launch_inference_server.sh
+ALLOW_REMOTE=1 HOST=0.0.0.0 bash scripts/launch_inference_server.sh   # robot on another host
+
+# or in the foreground
 uv run python -m raven.inference.server --host 127.0.0.1 --port 54322 \
     --scene-dir data/realworld/bww8-full-v2 \
     --landmarks-file data/realworld/bww8-full-v2/bww8-full-v2_landmarks.json \
