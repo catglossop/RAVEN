@@ -278,17 +278,6 @@ class ServerProtocolTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             RAVENPlanningServer(self.backend, completion="vlm")
 
-    def test_consecutive_checks_must_all_pass(self) -> None:
-        class Judge:
-            scores = [0.9, 0.5, 0.9, 0.9]
-
-            def score(self, text, target, evidence):
-                return self.scores.pop(0)
-
-        self.server = RAVENPlanningServer(self.backend, completion="vlm", judge=Judge(), completion_consecutive=2)
-        self.create()
-        self.assertEqual([self.goal(3)["goal_index"] for _ in range(4)], [0, 0, 0, 1])
-
     def test_failed_plans_report_an_error_and_clear_the_old_plan(self) -> None:
         self.create()
         self.assertEqual(self.create(length=0), {"error": "length must be positive", "done": False})

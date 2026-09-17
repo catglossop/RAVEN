@@ -50,42 +50,35 @@ This is the per-k protocol used in the Plan Bench runs.
 The server decides when a goal is complete, as RAGNav's does. The OmniVLA action server
 calls `get_goal` every `--done-check-interval` actions.
 
-**Default: `--completion vlm`.** This is RAGNav's Gemma mode, run on RAVEN's VLM:
+**Default: `--completion vlm`.** This is RAGNav's Gemma mode, unchanged apart from running on
+RAVEN's VLM:
 
-- The VLM receives RAGNav's completion prompt, the goal's instruction, the goal image, and the
-  224×224 crop of the robot's view. It replies with a score from 0.0 to 1.0.
-- The goal advances once the score exceeds 0.8 (`--completion-threshold`) on 2 checks in a row
-  (`--completion-consecutive`). RAGNav advances after 1.
-- Each check is one Gemini call: about 1.7 s median and $0.003 with thinking off
-  (`--completion-thinking-budget 0`, the default).
+- The VLM receives RAGNav's completion prompt verbatim
+  (`GEMMA_OBJECTIVE_COMPLETION_PROMPT` from `RAGNav/planner/prompts.py`), the goal's
+  instruction, the goal image, and the 224×224 crop of the robot's view. It replies with a
+  score from 0.0 to 1.0.
+- One check decides: the goal advances when the score exceeds 0.8
+  (`--completion-threshold`), as in RAGNav.
+- Thinking is off (`--completion-thinking-budget 0`), matching RAGNav's `ENABLE_THINKING =
+  False`. Each check is then one Gemini call of about 1.7 s and $0.003.
 
-**Why the robot needs a VLM check.** The robot is always on a *different traversal* from the
-tour in memory. Replaying OpenLORIS home1 runs against another run's memory showed that
-single-image embeddings cannot tell whether that traversal has reached a goal:
+**Know what this check does.** RAGNav's prompt asks for a passing "skip" score when the robot
+looks lost or the goal is not in sight, so a goal can be passed without being reached. Scoring
+OpenLORIS views taken on *other traversals* than the goal image, 30 per band ("at goal" = within
+0.75 m and facing within 45°):
 
-| Rule | Reachable goals accepted within 1.5 m | Unreachable goals accepted (> 3 m) |
-|---|---|---|
-| QQMM, a nearest memory image within ±17 frames of the goal | 20% | 85% |
-| QQMM, cosine similarity to the goal image > 0.8 | 12% | 6% |
-
-Gemini with RAGNav's prompt was tested on 30 views per distance band, taken from other
-traversals than the goal image. "At goal" means within 0.75 m and facing within 45°.
-
-| Prompt | at goal | 1–2 m | 2.5–4 m | > 6 m |
+| Check | at goal | 1–2 m | 2.5–4 m | > 6 m |
 |---|---|---|---|---|
-| RAGNav's, verbatim (`--completion-prompt ragnav`) | 90% | 83% | 90% | **100%** |
-| without the skip rule (`no-skip`, default) | 47% | 0% | 7% | 7% |
+| VLM, RAGNav's prompt (default) | 90% | 83% | 90% | **100%** |
+| QQMM cosine > 0.8 (`threshold`) | 7% | 0% | 0% | 0% |
 
-RAGNav's prompt tells the model to give a passing "skip" score when the goal is not in sight,
-so it accepts goals from anywhere. The `no-skip` prompt is RAGNav's with only that rule
-removed.
-
-About half of at-goal views pass a single check. That is enough, because the robot is checked
-repeatedly once it arrives. Requiring 2 passes in a row cuts accidental passes from farther
-away.
+Raise `--completion-threshold` to tighten it, or point `--completion-vlm` at the Gemma
+checkpoint RAGNav scores with (`google/gemma-4-E4B-it`) to run the identical check.
 
 **Embedding-only rules.** `--completion localize` and `--completion threshold` need no VLM
-calls, but are only reliable when the robot's views come from the same tour.
+calls, but are only reliable when the robot's views come from the same tour. Replaying
+OpenLORIS home1 runs against another run's memory, `localize` accepted 85% of goals the robot
+never came within 3 m of, and `threshold` accepted only 12% of goals it did reach.
 
 - The `localize` window is measured in frames. Frames are ordered by numeric file name
   (`0.jpg`, `1.jpg`, ...), then by name.

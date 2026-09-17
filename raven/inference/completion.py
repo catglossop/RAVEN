@@ -3,13 +3,18 @@
 RAGNav's planning server, run with ``--use-gemma`` (its launch default), asks a VLM how far the
 robot has got toward the current goal: the objective text, the goal image and the robot's view
 go to ``GemmaPlannerPrompter.score_objective_completion`` with ``GEMMA_OBJECTIVE_COMPLETION_PROMPT``,
-and the goal advances when the score exceeds 0.8. This module sends the same prompt and inputs
-to RAVEN's VLM. The prompt (``prompts/plan_vlm_prompts/completion_system_prompt.txt``) is copied
-verbatim; note that it tells the model to give a high "skip" score when the robot seems lost or
-the goal is not in sight, so a goal can be passed without being reached.
+and the goal advances when the score exceeds 0.8. This module sends that prompt and those inputs
+to RAVEN's VLM instead, so the arrival check is RAGNav's, unchanged: the prompt is copied
+verbatim, one check decides, and thinking is off (RAGNav runs Gemma with ``ENABLE_THINKING = False``).
 
-Embedding similarity alone does not work across traversals: replaying OpenLORIS home1 runs
-against another run's memory, a rule strict enough to rarely accept unreachable goals (QQMM
+The prompt tells the model to give a high "skip" score when the robot seems lost or the goal is
+not in sight, so a goal can be passed without being reached. Scoring cross-traversal OpenLORIS
+home1 views with Gemini, 100% of views more than 6 m from the goal scored above 0.8. Raise
+``--completion-threshold`` if that is too loose, or run the judge on the same Gemma checkpoint
+RAGNav uses.
+
+Embedding similarity alone does not work across traversals either: replaying OpenLORIS home1
+runs against another run's memory, a rule strict enough to rarely accept unreachable goals (QQMM
 cosine > 0.8) accepted only 12% of reachable goals within 1.5 m.
 """
 
@@ -25,11 +30,9 @@ from typing import Any, List, Optional, Union
 import numpy as np
 from PIL import Image
 
-_PROMPT_DIR = Path(__file__).resolve().parents[1] / "prompts" / "plan_vlm_prompts"
-PROMPT_FILE = _PROMPT_DIR / "completion_system_prompt.txt"
-# "ragnav": RAGNav's prompt verbatim. "no-skip": the same prompt without its rule to give a high
-# "skip" score when the goal is not in sight, which otherwise accepts goals from anywhere.
-PROMPTS = {"no-skip": _PROMPT_DIR / "completion_system_prompt_no_skip.txt", "ragnav": PROMPT_FILE}
+# RAGNav's GEMMA_OBJECTIVE_COMPLETION_PROMPT, verbatim (RAGNav/planner/prompts.py in
+# remap-inference-staging, the prompt its real-world planning server loads).
+PROMPT_FILE = Path(__file__).resolve().parents[1] / "prompts" / "plan_vlm_prompts" / "completion_system_prompt.txt"
 _NUMBER = re.compile(r"\d+(?:\.\d+)?")
 
 ImageInput = Union[str, Path, np.ndarray]
